@@ -1,0 +1,42 @@
+groups:
+  - name: infrastructure-lab
+    rules:
+      - alert: ApiUnavailable
+        expr: up{job="api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "Infrastructure Lab API is unavailable"
+          description: "Prometheus cannot scrape the API for more than one minute."
+
+      - alert: PostgreSqlUnavailable
+        expr: up{job="postgresql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "Infrastructure Lab PostgreSQL exporter is unavailable"
+          description: "Prometheus cannot scrape PostgreSQL metrics for more than one minute."
+
+      - alert: HighApiErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API 5xx error rate is above 5%"
+          description: "More than 5% of API requests have returned 5xx responses for five minutes."
+
+      - alert: HighApiLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API p95 latency is above one second"
+          description: "The 95th percentile of API response time has exceeded one second for five minutes."
