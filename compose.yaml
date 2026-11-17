@@ -55,6 +55,27 @@ services:
     networks:
       - internal
 
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    restart: unless-stopped
+    networks:
+      - internal
+
+  telegram-notifier:
+    build: ./telegram-notifier
+    env_file: .env
+    restart: unless-stopped
+    networks:
+      - internal
+
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.16.0
     environment:
@@ -102,6 +123,7 @@ volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  alertmanager_data:
 
 networks:
   internal:
