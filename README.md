@@ -95,7 +95,8 @@ Grafana доступна только с этого компьютера: `http:
 
 1. запускает Ruff и pytest;
 2. проверяет Docker Compose-конфигурацию;
-3. собирает Docker-образ API.
+3. собирает и запускает ключевые сервисы Docker Compose;
+4. проверяет `/health`, `/ready` API и готовность Prometheus с Alertmanager.
 
 Локальная проверка перед публикацией:
 
