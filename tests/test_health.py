@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import IncidentCreate, IncidentSeverity, IncidentStatus, IncidentStatusUpdate, app
 
 
 def test_health_endpoint_returns_ok() -> None:
@@ -20,3 +20,11 @@ def test_metrics_endpoint_exposes_http_counter() -> None:
 
     assert response.status_code == 200
     assert "http_requests_total" in response.text
+
+
+def test_incident_payloads_use_controlled_values() -> None:
+    incident = IncidentCreate(title="Nginx is unavailable", severity="high")
+    update = IncidentStatusUpdate(status="investigating")
+
+    assert incident.severity is IncidentSeverity.high
+    assert update.status is IncidentStatus.investigating

@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
+from enum import StrEnum
 from time import perf_counter
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -16,15 +19,64 @@ engine = create_async_engine(settings.database_url, pool_pre_ping=True)
 session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+class IncidentSeverity(StrEnum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    critical = "critical"
+
+
+class IncidentStatus(StrEnum):
+    open = "open"
+    investigating = "investigating"
+    resolved = "resolved"
+
+
+class IncidentCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=160, examples=["API readiness check failed"])
+    description: str = Field(default="", max_length=2_000)
+    severity: IncidentSeverity = IncidentSeverity.medium
+
+
+class IncidentStatusUpdate(BaseModel):
+    status: IncidentStatus
+
+
+class Incident(BaseModel):
+    id: int
+    title: str
+    description: str
+    severity: IncidentSeverity
+    status: IncidentStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+CREATE_INCIDENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS incidents (
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    severity VARCHAR(16) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+    status VARCHAR(16) NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'investigating', 'resolved')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    async with engine.begin() as connection:
+        await connection.execute(text(CREATE_INCIDENTS_TABLE))
     yield
     await engine.dispose()
 
 
 app = FastAPI(
     title="Infrastructure Lab API",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -62,6 +114,73 @@ async def readiness_check() -> dict[str, str]:
     async with session_factory() as session:
         await session.execute(text("SELECT 1"))
     return {"status": "ready", "database": "ok"}
+
+
+@app.post(
+    "/incidents",
+    response_model=Incident,
+    status_code=status.HTTP_201_CREATED,
+    tags=["incidents"],
+)
+async def create_incident(payload: IncidentCreate) -> Incident:
+    """Register an operational incident for follow-up."""
+    query = text(
+        """
+        INSERT INTO incidents (title, description, severity)
+        VALUES (:title, :description, :severity)
+        RETURNING id, title, description, severity, status, created_at, updated_at
+        """
+    )
+    async with session_factory() as session:
+        result = await session.execute(
+            query,
+            {
+                "title": payload.title,
+                "description": payload.description,
+                "severity": payload.severity.value,
+            },
+        )
+        await session.commit()
+        return Incident.model_validate(result.mappings().one())
+
+
+@app.get("/incidents", response_model=list[Incident], tags=["incidents"])
+async def list_incidents() -> list[Incident]:
+    """Show incidents, placing unresolved items first."""
+    query = text(
+        """
+        SELECT id, title, description, severity, status, created_at, updated_at
+        FROM incidents
+        ORDER BY (status = 'resolved'), created_at DESC
+        """
+    )
+    async with session_factory() as session:
+        result = await session.execute(query)
+        return [Incident.model_validate(row) for row in result.mappings().all()]
+
+
+@app.patch("/incidents/{incident_id}/status", response_model=Incident, tags=["incidents"])
+async def update_incident_status(
+    incident_id: int, payload: IncidentStatusUpdate
+) -> Incident:
+    """Move an incident through the operational response workflow."""
+    query = text(
+        """
+        UPDATE incidents
+        SET status = :status, updated_at = CURRENT_TIMESTAMP
+        WHERE id = :incident_id
+        RETURNING id, title, description, severity, status, created_at, updated_at
+        """
+    )
+    async with session_factory() as session:
+        result = await session.execute(
+            query, {"incident_id": incident_id, "status": payload.status.value}
+        )
+        incident = result.mappings().one_or_none()
+        if incident is None:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        await session.commit()
+        return Incident.model_validate(incident)
 
 
 @app.get("/metrics", include_in_schema=False)
