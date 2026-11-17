@@ -55,7 +55,9 @@ jobs:
             if curl --fail --silent --show-error http://localhost:8080/health \
               && curl --fail --silent --show-error http://localhost:8080/ready \
               && curl --fail --silent --show-error http://localhost:9090/-/ready \
-              && curl --fail --silent --show-error http://localhost:9093/-/ready; then
+              && curl --fail --silent --show-error http://localhost:9093/-/ready \
+              && curl --fail --silent --show-error http://localhost:3000/api/health \
+              && docker compose exec -T telegram-notifier python -c "from urllib.request import urlopen; assert urlopen('http://127.0.0.1:8081/health').status == 200"; then
               exit 0
             fi
             sleep 2
