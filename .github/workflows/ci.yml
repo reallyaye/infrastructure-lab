@@ -49,6 +49,15 @@ jobs:
           docker compose up -d --build
           database api nginx prometheus postgres-exporter alertmanager telegram-notifier grafana
 
+      - name: Scan API image for critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: infrastructure-lab-api:latest
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL
+
       - name: Wait for services and verify health endpoints
         run: |
           for attempt in {1..30}; do
